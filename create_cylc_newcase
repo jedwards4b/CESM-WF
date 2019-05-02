@@ -3,7 +3,7 @@ import os, sys, glob, shutil, subprocess
 import distutils.dir_util
 import json
 
-# Get the casename 
+# Get the casename
 for i in range(0, len(sys.argv)):
     if '-case' in sys.argv[i]:
         case_root = sys.argv[i+1]
@@ -29,7 +29,7 @@ sourceMods_dir = ''
 suite_location = '/glade/u/home/'+os.environ['USER']+'/cylc_suites/'
 
 # Email address to have cylc send wf status updates as it runs
-email = os.environ['USER']+'@ucar.edu,mickelso@ucar.edu,expdb@cgd.ucar.edu'
+email = os.environ['USER']+'@ucar.edu'
 
 # svn username
 svn_username = "cmip6"
@@ -39,7 +39,7 @@ ppmach = 'cheyenne'
 
 # Set to 'True' or 'False' if this is a WACCM run
 # If set to true, this will modify some of the CESM-CMIP6 requested variable definitions (no other effect)
-WACCM_RUN = False 
+WACCM_RUN = False
 HIRES_RUN = False
 CLM_RUN = False
 
@@ -51,7 +51,7 @@ queue = 'None'
 cesm_xml={
 	 'RESUBMIT': '4',
 	 'STOP_N': '2',
-	 'STOP_OPTION': 'nyears',
+	 'STOP_OPTION': 'ndays',
 	 'DOUT_S': 'TRUE'
 	 }
 
@@ -98,9 +98,9 @@ pp_xml={
 def main(argv=None):
 
     # Location of cesm code base
-    cesm_code_base = '/glade/work/'+os.environ['USER']+'/cesm_sandbox/cesm2.0'
+    cesm_code_base = '/glade/work/'+os.environ['USER']+'/sandboxes/cesm2_1'
 
-    create(cesm_code_base, testing=False)
+    create(cesm_code_base, testing=True)
 
 
 
@@ -127,8 +127,8 @@ def create(cesm_code_base, testing=True, command=None):
     new_case = new_case.replace(os.path.basename(__file__),'create_newcase')
     err=os.system(new_case)
     if err!=0:
-	print '\033[91m','Error: Failed to create new CESM case.','\033[0m' 
-	print '\033[91m','Tried running: ',new_case,'\033[0m' 
+	print '\033[91m','Error: Failed to create new CESM case.','\033[0m'
+	print '\033[91m','Tried running: ',new_case,'\033[0m'
 	sys.exit()
     for i in range(0, len(sys.argv)):
 	if '-case' in sys.argv[i]:
@@ -152,7 +152,7 @@ def create(cesm_code_base, testing=True, command=None):
 	execfile(activate_file, dict(__file__=activate_file))
 	err=os.system('create_postprocess -caseroot '+case_root)
 	if err!=0:
-	    print '\033[91m','Error: Failed to create post processing','\033[0m'                            
+	    print '\033[91m','Error: Failed to create post processing','\033[0m'
 	    print '\033[91m','Tried running: ','create_postprocess -caseroot '+case_root,'\033[0m'
 	    sys.exit()
 
@@ -163,12 +163,12 @@ def create(cesm_code_base, testing=True, command=None):
         print '############################################'
         print ''
         case_name = os.path.basename(os.path.normpath(case_root))
-        err=os.system("./archive_metadata --query_cmip6 "+case_name+"  db.json --user "+svn_username+" --password --expType CMIP6")
-        if err!=0:
-            print '\033[91m','Error: Failed in call to the db to get exp information','\033[0m'
-            sys.exit()
-        #db_file = '/gpfs/fs1/work/mickelso/testing/CESM-WF/db.json' 
-        db_file = case_root+"/archive_files/db.json"
+#        err=os.system("./archive_metadata --query_cmip6 "+case_name+"  db.json --user "+svn_username+" --password --expType CMIP6")
+#        if err!=0:
+#            print '\033[91m','Error: Failed in call to the db to get exp information','\033[0m'
+#            sys.exit()
+        #db_file = '/gpfs/fs1/work/mickelso/testing/CESM-WF/db.json'
+        db_file = "/glade/work/jedwards/sandboxes/cesm2_1/cime/scripts/db.json"
 
         print '############################################'
         print ''
@@ -235,7 +235,7 @@ def create(cesm_code_base, testing=True, command=None):
 	err=os.system('./preview_namelists')
 	if err!=0:
 	    print '\033[91m','Error: Failed in call to preview_namelist','\033[0m'
-	    sys.exit() 
+	    sys.exit()
 
     if cp_sourceMods == True or cp_sourceMods == 'TRUE' or cp_sourceMods == 'true':
         print '############################################'
@@ -262,6 +262,7 @@ def create(cesm_code_base, testing=True, command=None):
 
     os.chdir(case_root+'/postprocess/')
     conform = subprocess.check_output('./pp_config -value -caseroot '+case_root+'/postprocess/'+' --get STANDARDIZE_TIMESERIES', shell=True)
+    conform = 'FALSE'
     if 'TRUE' in conform:
         print '############################################'
         print ''
@@ -269,7 +270,7 @@ def create(cesm_code_base, testing=True, command=None):
         print ''
         print '############################################'
         print ''
-        
+
         # if running a waccm run, change the value of the definition file to be for the waccm def set
         if WACCM_RUN:
             err=os.system('./pp_config --set CONFORM_CESM_DEFINITIONS=/glade/p/cesm/conform-input/cmip6_input/CESM_WACCM_MastList.def')
@@ -290,7 +291,7 @@ def create(cesm_code_base, testing=True, command=None):
                 print '\033[91m','Error: Failed to change a post processing xml variable','\033[0m'
                 print '\033[91m','Tried running: ','./pp_config --set CONFORM_CESM_DEFINITIONS=/glade/p/cesm/conform-input/cmip6_input/CESM_CLM_MastList.def','\033[0m'
                 sys.exit()
- 
+
         with open(db_file) as db:
             db_info = json.load(db)
         exp_name = db_info["experiment_id"]
@@ -311,7 +312,7 @@ def create(cesm_code_base, testing=True, command=None):
         if err!=0:
             print '\033[91m','Error: Failed in call to iconform','\033[0m'
             sys.exit()
-    
+
 
 #    if build == True or build == 'TRUE' or build == 'true':
 #	print '############################################'
@@ -340,7 +341,7 @@ def create(cesm_code_base, testing=True, command=None):
             sys.exit()
 
     # Toggle to build the case
-    build = 'False' #True or False 
+    build = 'False' #True or False
     print '############################################'
     print ''
     print '   Setup Cylc Automation'
@@ -394,4 +395,3 @@ def create(cesm_code_base, testing=True, command=None):
 
 if __name__ == '__main__':
     main()
-
