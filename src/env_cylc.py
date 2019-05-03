@@ -221,8 +221,10 @@ class EnvCylc():
 #                            directives[job_].append(d[0]+' = '+d[1])
 
 #### Start temp code to get pbs directives from case.run
+            project = os.getenv('PROJECT')
             if 'st_archive' in job_:
-                directives[job_].append("-A = "+os.getenv('PROJECT'))
+                if project:
+                    directives[job_].append("-A = "+os.getenv('PROJECT'))
                 directives[job_].append("-q = regular")
                 with open(my_case+"/case.st_archive") as f:
                     for l in f:
@@ -232,7 +234,8 @@ class EnvCylc():
                                 directives[job_].append(pbs_split[1]+" = "+pbs_split[2])
             else:
                 with open(my_case+"/.case.run") as f:
-                    directives[job_].append("-A = "+os.getenv('PROJECT'))
+                    if project:
+                        directives[job_].append("-A = "+os.getenv('PROJECT'))
                     directives[job_].append("-q = regular")
                     for l in f:
                         if '#PBS' in l:

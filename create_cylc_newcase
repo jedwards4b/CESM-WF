@@ -3,6 +3,7 @@ import os, sys, glob, shutil, subprocess, configparser
 import distutils.dir_util
 import json
 
+#global variables defined in cesm_cylc.config
 cesm_code_base = ""
 # Central location for all of your cylc suites (it is recomended to keep this the same for all cylc suites)
 suite_location = ""
@@ -10,23 +11,21 @@ suite_location = ""
 email = ""
 # svn username
 svn_username = ""
+use_db = False
+cesm_xml={}
+pp_xml = {}
 
 # Machine to run pp on (geyser, cheyenne)
-ppmach = 'cheyenne'
+ppmach = 'izumi'
 
-use_db = False
 
 # Set to 'True' or 'False' if this is a WACCM run
 # If set to true, this will modify some of the CESM-CMIP6 requested variable definitions (no other effect)
-WACCM_RUN = False
-HIRES_RUN = False
-CLM_RUN = False
+cesm_runtype = {"WACCM_RUN":False, "HIRES_RUN": False, "CLM_RUN":False}
+
 
 # Add a specific queue to use.  Set to 'None' if you want the default.  Set to 'queue name' if you want a specific queue.
 queue = 'None'
-
-cesm_xml={}
-pp_xml = {}
 
 
 def main(argv=None):
@@ -39,15 +38,26 @@ def main(argv=None):
     create(cesm_code_base, testing=False)
 
 def _read_cesm_cylc_config(config_file):
-    global cesm_code_base, pp_xml, cesm_xml, use_db, suite_location
+    global cesm_code_base, pp_xml, cesm_xml, use_db, suite_location, svn_username, email
 
     cesm_cylc_config = configparser.SafeConfigParser()
     cesm_cylc_config.read(config_file)
     if cesm_cylc_config.has_section('main'):
         if cesm_cylc_config.has_option('main', 'CESMROOT'):
             cesm_code_base = os.path.expandvars(cesm_cylc_config.get('main', 'CESMROOT'))
+        if cesm_cylc_config.has_option('main', 'email'):
+            email = os.path.expandvars(cesm_cylc_config.get('main', 'email'))
         if cesm_cylc_config.has_option('main', 'SUITE_OUTPUT_ROOT'):
             suite_location = os.path.expandvars(cesm_cylc_config.get('main', 'SUITE_OUTPUT_ROOT'))
+        for runtype in ('WACCM_RUN','HIRES_RUN','CLM_RUN'):
+            if cesm_cylc_config.has_option('main', runtype):
+                if cesm_cylc_config.get('main', runtype).upper() == "TRUE":
+                    cesm_runtype[runtype] = True
+                else:
+                    cesm_runtype[runtype] = False
+                    
+
+
             
     if cesm_cylc_config.has_section('pp_input'):
         for item, value in cesm_cylc_config.items('pp_input'):
@@ -56,15 +66,24 @@ def _read_cesm_cylc_config(config_file):
                 os.environ['POSTPROCESS_PATH_GEYSER'] = os.environ.get(item.upper())
             else:
                 pp_xml[item] = os.path.expandvars(value)
+#            if pp_xml[item].upper() == "TRUE":
+#                pp_xml[item] = True
+#            elif pp_xml[item].upper() == "FALSE":
+#                pp_xml[item] = False
+
     if cesm_cylc_config.has_section('cesm_input'):
         for item, value in cesm_cylc_config.items('cesm_input'):
             cesm_xml[item] = os.path.expandvars(value)
+#            if cesm_xml[item].upper() == "TRUE":
+#                cesm_xml[item] = True
+#            elif cesm_xml[item].upper() == "FALSE":
+#                cesm_xml[item] = False
+                
     if cesm_cylc_config.has_section('experiment_db'):
         if cesm_cylc_config.has_option('experiment_db', 'use_db'):
             use_db_string = cesm_cylc_config.get('experiment_db', 'use_db')
             if use_db_string.upper() == "TRUE":
                 use_db = True
-        if use_db:
             if cesm_cylc_config.has_option('experiment_db', 'svn_username'):
                 svn_username = cesm_cylc_config.get('experiment_db', 'svn_username')
 
@@ -124,16 +143,16 @@ def create(cesm_code_base, testing=True, command=None):
 	    print '\033[91m','Tried running: ','create_postprocess -caseroot '+case_root,'\033[0m'
 	    sys.exit()
 
-        print '############################################'
-        print ''
-        print '   Getting experiment details from the db   '
-        print ''
-        print '############################################'
-        print ''
-        case_name = os.path.basename(os.path.normpath(case_root))
-
         global use_db
         if use_db:
+            print '############################################'
+            print ''
+            print '   Getting experiment details from the db   '
+            print ''
+            print '############################################'
+            print ''
+            case_name = os.path.basename(os.path.normpath(case_root))
+
             #        err=os.system("./archive_metadata --query_cmip6 "+case_name+"  db.json --user "+svn_username+" --password --expType CMIP6")
             #        if err!=0:
             #            print '\033[91m','Error: Failed in call to the db to get exp information','\033[0m'
@@ -161,9 +180,6 @@ def create(cesm_code_base, testing=True, command=None):
 	    os.environ['PATH'] = old_os_path
 	    sys.prefix = old_sys_prefix
 	    sys.path[:0] = old_sys_path
-        else:
-	    print '\033[91m','Warning: Cannot add postprocessing to Cylc workflow because the package cannot be found.','\033[0m'
-	    print '\033[91m','Execting: ',os.environ['POSTPROCESS_PATH']+'/cesm-env2/bin/activate_this.py','\033[0m'
 
 
     print '############################################'
@@ -181,8 +197,6 @@ def create(cesm_code_base, testing=True, command=None):
 	    sys.exit()
     if os.path.isdir(case_root+'/postprocess/'):
 	os.chdir(case_root+'/postprocess/')
-        pp_xml['CONFORM_OUTPUT_DIR'] = '/glade/collections/cdg/cmip6/'+str(db_info["case_id"])+"/"
-        #pp_xml['CONFORM_OUTPUT_DIR'] = '/glade/scratch/cmip6/archive/CMIP6_DATA/'+case_root.split('/')[-1]
 	for k,v in pp_xml.iteritems():
 	    print 'Setting ',k,' to ',v
 	    err=os.system('./pp_config --set '+k+'='+v)
@@ -190,34 +204,6 @@ def create(cesm_code_base, testing=True, command=None):
 		print '\033[91m','Error: Failed to change a post processing xml variable','\033[0m'
 		print '\033[91m','Tried running: ','./pp_config --set '+k+'='+v,'\033[0m'
 		sys.exit()
-
-    if cp_namelist == True or cp_namelist == 'TRUE' or cp_namelist == 'true':
-	print '############################################'
-	print ''
-	print '   Copy user_namelists'
-	print ''
-	print '############################################'
-	print ''
-	os.chdir(case_root)
-	for f in glob.glob(namelist_dir+'/user_nl_*'):
-	    fn = os.path.basename(f)
-	    shutil.copyfile(f,case_root+'/'+fn)
-	    print 'Copied: ', f, ' to ', case_root+'/'+fn
-	err=os.system('./preview_namelists')
-	if err!=0:
-	    print '\033[91m','Error: Failed in call to preview_namelist','\033[0m'
-	    sys.exit()
-
-    if cp_sourceMods == True or cp_sourceMods == 'TRUE' or cp_sourceMods == 'true':
-        print '############################################'
-        print ''
-        print '   Copy sourceMods'
-        print ''
-        print '############################################'
-        print ''
-        os.chdir(case_root)
-        distutils.dir_util.copy_tree(sourceMods_dir,case_root+'/SourceMods/')
-        print 'Copied: ', sourceMods_dir, ' to ', case_root+'/SourceMods/'
 
     print '############################################'
     print ''
@@ -243,20 +229,20 @@ def create(cesm_code_base, testing=True, command=None):
         print ''
 
         # if running a waccm run, change the value of the definition file to be for the waccm def set
-        if WACCM_RUN:
+        if cesm_runtype['WACCM_RUN']:
             err=os.system('./pp_config --set CONFORM_CESM_DEFINITIONS=/glade/p/cesm/conform-input/cmip6_input/CESM_WACCM_MastList.def')
             err=os.system('./pp_config --set CONFORM_GLOBAL_ATTRIBUTES=/glade/p/cesm/conform-input/cmip6_input/CESM_CMIP6_WACCM.ga')
             if err!=0:
                 print '\033[91m','Error: Failed to change a post processing xml variable','\033[0m'
                 print '\033[91m','Tried running: ','./pp_config --set CONFORM_CESM_DEFINITIONS=/glade/p/cesm/conform-input/cmip6_input/CESM_WACCM_MastList.def','\033[0m'
                 sys.exit()
-        if HIRES_RUN:
+        if cesm_runtype['HIRES_RUN']:
             err=os.system('./pp_config --set CONFORM_CESM_DEFINITIONS=/glade/p/cesm/conform-input/cmip6_input/CESM_HIRES_MastList.def')
             if err!=0:
                 print '\033[91m','Error: Failed to change a post processing xml variable','\033[0m'
                 print '\033[91m','Tried running: ','./pp_config --set CONFORM_CESM_DEFINITIONS=/glade/p/cesm/conform-input/cmip6_input/CESM_HIRES_MastList.def','\033[0m'
                 sys.exit()
-        if CLM_RUN:
+        if cesm_runtype['CLM_RUN']:
             err=os.system('./pp_config --set CONFORM_CESM_DEFINITIONS=/glade/p/cesm/conform-input/cmip6_input/CESM_CLM_MastList.def')
             if err!=0:
                 print '\033[91m','Error: Failed to change a post processing xml variable','\033[0m'
@@ -298,7 +284,7 @@ def create(cesm_code_base, testing=True, command=None):
 #	    print '\033[91m','Error: Failed in call to case.build','\033[0m'
 #	    sys.exit()
 
-    if not testing:
+    if use_db and not testing:
         print '############################################'
         print ''
         print '   Archive the case in the db   '
