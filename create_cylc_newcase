@@ -1,41 +1,20 @@
 #! /usr/bin/env python
-import os, sys, glob, shutil, subprocess
+import os, sys, glob, shutil, subprocess, configparser
 import distutils.dir_util
 import json
 
-# Get the casename
-for i in range(0, len(sys.argv)):
-    if '-case' in sys.argv[i]:
-        case_root = sys.argv[i+1]
-        casename = os.path.basename(sys.argv[i+1])
-    elif '-compset' in sys.argv[i]:
-        compset = sys.argv[i+1]
-
-#############################################################################
-#
-# User Modify Section
-#
-#############################################################################
-
-# Toggle to copy user name lists from the specified directory
-cp_namelist = False
-namelist_dir = ''
-
-# Toggle to copy user Source Mods from the specified directory
-cp_sourceMods = False
-sourceMods_dir = ''
-
+cesm_code_base = ""
 # Central location for all of your cylc suites (it is recomended to keep this the same for all cylc suites)
-suite_location = '/glade/u/home/'+os.environ['USER']+'/cylc_suites/'
-
+suite_location = ""
 # Email address to have cylc send wf status updates as it runs
-email = os.environ['USER']+'@ucar.edu'
-
+email = ""
 # svn username
-svn_username = "cmip6"
+svn_username = ""
 
 # Machine to run pp on (geyser, cheyenne)
 ppmach = 'cheyenne'
+
+use_db = False
 
 # Set to 'True' or 'False' if this is a WACCM run
 # If set to true, this will modify some of the CESM-CMIP6 requested variable definitions (no other effect)
@@ -46,64 +25,50 @@ CLM_RUN = False
 # Add a specific queue to use.  Set to 'None' if you want the default.  Set to 'queue name' if you want a specific queue.
 queue = 'None'
 
-
-# Add/Revove/Modify any of the CESM xml variables you would like to set or change
-cesm_xml={
-	 'RESUBMIT': '4',
-	 'STOP_N': '2',
-	 'STOP_OPTION': 'ndays',
-	 'DOUT_S': 'TRUE'
-	 }
-
-# Add/Revove/Modify any of the post processing xml variables you would like to set or change
-pp_xml={
-       'GENERATE_TIMESERIES': 'TRUE',
-       'STANDARDIZE_TIMESERIES': 'TRUE',
-       'TIMESERIES_OUTPUT_ROOTDIR': '/gpfs/fs1/collections/cdg/timeseries-cmip6/'+case_root.split('/')[-1],
-       'CONFORM_OUTPUT_DIR': '/glade/scratch/'+os.environ['USER']+'/archive/CMIP6_DATA/'+case_root.split('/')[-1],
-       'GENERATE_AVGS_ATM': 'TRUE',
-       'GENERATE_DIAGS_ATM': 'TRUE',
-       'ATMDIAG_test_first_yr': '2',
-       'ATMDIAG_test_nyrs': '2',
-       'ATMDIAG_TEST_TIMESERIES': 'FALSE',
-       'GENERATE_AVGS_OCN': 'TRUE',
-       'GENERATE_DIAGS_OCN': 'TRUE',
-       'OCNDIAG_YEAR0': '2',
-       'OCNDIAG_YEAR1': '4',
-       'OCNDIAG_TSERIES_YEAR0': '2',
-       'OCNDIAG_TSERIES_YEAR1': '4',
-       'OCNDIAG_MODELCASE_INPUT_TSERIES': 'FALSE',
-       'GENERATE_AVGS_LND': 'TRUE',
-       'GENERATE_DIAGS_LND': 'TRUE',
-       'LNDDIAG_clim_first_yr_1': '2',
-       'LNDDIAG_clim_num_yrs_1': '2',
-       'LNDDIAG_trends_first_yr_1': '2',
-       'LNDDIAG_trends_num_yrs_1': '2',
-       'LNDDIAG_CASE1_TIMESERIES': 'FALSE',
-       'GENERATE_AVGS_ICE': 'TRUE',
-       'GENERATE_DIAGS_ICE': 'TRUE',
-       'ICEDIAG_BEGYR_DIFF': '2',
-       'ICEDIAG_ENDYR_DIFF': '4',
-       'ICEDIAG_BEGYR_CONT': '2',
-       'ICEDIAG_ENDYR_CONT': '4',
-       'ICEDIAG_DIFF_TIMESERIES': 'FALSE',
-       'ICEDIAG_YRS_TO_AVG': '2',
-       'USER_NAME': 'cmip6',
-       'GLOBAL_WEBHOST': 'burnt.cgd.ucar.edu',
-       'GLOBAL_WEBLOGIN': 'cmip6',
-       'GLOBAL_REMOTE_WEBDIR': '/project/diagnostics/external/'+compset+'/'+casename+'/'
-       }
+cesm_xml={}
+pp_xml = {}
 
 
 def main(argv=None):
+    cesm_cylc_config_file = "cesm_cylc.config"
+    if not os.path.isfile(cesm_cylc_config_file):
+	print '\033[91m','Error: No config file found','\033[0m'
+	sys.exit()        
 
-    # Location of cesm code base
-    cesm_code_base = '/glade/work/'+os.environ['USER']+'/sandboxes/cesm2_1'
+    _read_cesm_cylc_config(cesm_cylc_config_file)
+    create(cesm_code_base, testing=False)
 
-    create(cesm_code_base, testing=True)
+def _read_cesm_cylc_config(config_file):
+    global cesm_code_base, pp_xml, cesm_xml, use_db, suite_location
 
+    cesm_cylc_config = configparser.SafeConfigParser()
+    cesm_cylc_config.read(config_file)
+    if cesm_cylc_config.has_section('main'):
+        if cesm_cylc_config.has_option('main', 'CESMROOT'):
+            cesm_code_base = os.path.expandvars(cesm_cylc_config.get('main', 'CESMROOT'))
+        if cesm_cylc_config.has_option('main', 'SUITE_OUTPUT_ROOT'):
+            suite_location = os.path.expandvars(cesm_cylc_config.get('main', 'SUITE_OUTPUT_ROOT'))
+            
+    if cesm_cylc_config.has_section('pp_input'):
+        for item, value in cesm_cylc_config.items('pp_input'):
+            if item == 'postprocess_path':
+                os.environ[item.upper()] = os.path.expandvars(cesm_cylc_config.get('pp_input', 'POSTPROCESS_PATH'))
+                os.environ['POSTPROCESS_PATH_GEYSER'] = os.environ.get(item.upper())
+            else:
+                pp_xml[item] = os.path.expandvars(value)
+    if cesm_cylc_config.has_section('cesm_input'):
+        for item, value in cesm_cylc_config.items('cesm_input'):
+            cesm_xml[item] = os.path.expandvars(value)
+    if cesm_cylc_config.has_section('experiment_db'):
+        if cesm_cylc_config.has_option('experiment_db', 'use_db'):
+            use_db_string = cesm_cylc_config.get('experiment_db', 'use_db')
+            if use_db_string.upper() == "TRUE":
+                use_db = True
+        if use_db:
+            if cesm_cylc_config.has_option('experiment_db', 'svn_username'):
+                svn_username = cesm_cylc_config.get('experiment_db', 'svn_username')
 
-
+            
 def create(cesm_code_base, testing=True, command=None):
     #############################################################################
     #
@@ -136,7 +101,9 @@ def create(cesm_code_base, testing=True, command=None):
     os.chdir(case_root)
     case_root = os.getcwd()
 
-    if os.path.isfile(os.environ['POSTPROCESS_PATH']+'/cesm-env2/bin/activate_this.py'):
+    activate_file = os.path.join(os.environ['POSTPROCESS_PATH'],'cesm-env2','bin','activate_this.py')
+
+    if os.path.isfile(activate_file):
 	print '############################################'
 	print ''
 	print '   Create CESM Postprocessing'
@@ -148,9 +115,10 @@ def create(cesm_code_base, testing=True, command=None):
 	old_os_path = os.environ['PATH']
 	old_sys_path = list(sys.path)
 	old_sys_prefix = sys.prefix
-	activate_file = os.environ['POSTPROCESS_PATH']+'/cesm-env2/bin/activate_this.py'
 	execfile(activate_file, dict(__file__=activate_file))
+        print "Run create_postprocess with caseroot {}".format(case_root)
 	err=os.system('create_postprocess -caseroot '+case_root)
+
 	if err!=0:
 	    print '\033[91m','Error: Failed to create post processing','\033[0m'
 	    print '\033[91m','Tried running: ','create_postprocess -caseroot '+case_root,'\033[0m'
@@ -163,36 +131,39 @@ def create(cesm_code_base, testing=True, command=None):
         print '############################################'
         print ''
         case_name = os.path.basename(os.path.normpath(case_root))
-#        err=os.system("./archive_metadata --query_cmip6 "+case_name+"  db.json --user "+svn_username+" --password --expType CMIP6")
-#        if err!=0:
-#            print '\033[91m','Error: Failed in call to the db to get exp information','\033[0m'
-#            sys.exit()
-        #db_file = '/gpfs/fs1/work/mickelso/testing/CESM-WF/db.json'
-        db_file = "/glade/work/jedwards/sandboxes/cesm2_1/cime/scripts/db.json"
 
-        print '############################################'
-        print ''
-        print '   Figuring out which variables need to be '
-        print '   outputted by CESM'
-        print ''
-        print '############################################'
-        print ''
-        # while virtual env is activated, get the cesm variable lists for the output we need the model to write
-        with open(db_file) as db:
-            db_info = json.load(db)
-        exp_name = db_info["experiment_id"]
-        err=os.system(cdir+'/src/get_model_vars -e '+ exp_name+' -d /glade/p/cesm/conform-input/cmip6_input/')
-        if err!=0:
-            print '\033[91m','Error: Failed to create variable lists','\033[0m'
-            print '\033[91m','Tried running: ','./get_model_vars -h '+ exp_name,'\033[0m'
-            sys.exit()
-	# Get old values back
-	os.environ['PATH'] = old_os_path
-	sys.prefix = old_sys_prefix
-	sys.path[:0] = old_sys_path
-    else:
-	print '\033[91m','Warning: Cannot add postprocessing to Cylc workflow because the package cannot be found.','\033[0m'
-	print '\033[91m','Execting: ',os.environ['POSTPROCESS_PATH']+'/cesm-env2/bin/activate_this.py','\033[0m'
+        global use_db
+        if use_db:
+            #        err=os.system("./archive_metadata --query_cmip6 "+case_name+"  db.json --user "+svn_username+" --password --expType CMIP6")
+            #        if err!=0:
+            #            print '\033[91m','Error: Failed in call to the db to get exp information','\033[0m'
+            #            sys.exit()
+            #db_file = '/gpfs/fs1/work/mickelso/testing/CESM-WF/db.json'
+            db_file = "/glade/work/jedwards/sandboxes/cesm2_1/cime/scripts/db.json"
+
+            print '############################################'
+            print ''
+            print '   Figuring out which variables need to be '
+            print '   output by CESM'
+            print ''
+            print '############################################'
+            print ''
+            # while virtual env is activated, get the cesm variable lists for the output we need the model to write
+            with open(db_file) as db:
+                db_info = json.load(db)
+            exp_name = db_info["experiment_id"]
+            err=os.system(cdir+'/src/get_model_vars -e '+ exp_name+' -d /glade/p/cesm/conform-input/cmip6_input/')
+            if err!=0:
+                print '\033[91m','Error: Failed to create variable lists','\033[0m'
+                print '\033[91m','Tried running: ','./get_model_vars -h '+ exp_name,'\033[0m'
+                sys.exit()
+	    # Get old values back
+	    os.environ['PATH'] = old_os_path
+	    sys.prefix = old_sys_prefix
+	    sys.path[:0] = old_sys_path
+        else:
+	    print '\033[91m','Warning: Cannot add postprocessing to Cylc workflow because the package cannot be found.','\033[0m'
+	    print '\033[91m','Execting: ',os.environ['POSTPROCESS_PATH']+'/cesm-env2/bin/activate_this.py','\033[0m'
 
 
     print '############################################'
